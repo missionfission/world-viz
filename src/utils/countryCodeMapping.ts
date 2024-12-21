@@ -87,7 +87,7 @@ export const countryCodeMapping: { [key: string]: string } = {
   'HTI': 'HTI', // Haiti
   'HUN': 'HUN', // Hungary
   'IDN': 'IDN', // Indonesia
-  'IND': 'IND', // India
+  'IND': '356', // India
   'IRL': 'IRL', // Ireland
   'IRN': 'IRN', // Iran
   'IRQ': 'IRQ', // Iraq
@@ -190,7 +190,7 @@ export const countryCodeMapping: { [key: string]: string } = {
   'UGA': 'UGA', // Uganda
   'UKR': 'UKR', // Ukraine
   'URY': 'URY', // Uruguay
-  '840': 'USA', // United States
+  'USA': '840', // United States
   'UZB': 'UZB', // Uzbekistan
   'VCT': 'VCT', // Saint Vincent and the Grenadines
   'VEN': 'VEN', // Venezuela

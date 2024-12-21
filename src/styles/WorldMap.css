@@ -115,3 +115,30 @@ select:disabled {
   color: #4b5563;
   margin-left: 10px;
 }
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1rem;
+}
+
+.data-table th,
+.data-table td {
+  padding: 0.5rem;
+  text-align: left;
+  border: 1px solid #e5e7eb;
+}
+
+.data-table th {
+  background-color: #f3f4f6;
+  font-weight: 600;
+}
+
+.data-table tbody tr:hover {
+  background-color: #f9fafb;
+}
+
+.tab-panel {
+  height: calc(100vh - 120px);
+  overflow-y: auto;
+}

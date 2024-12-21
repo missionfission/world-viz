@@ -14,6 +14,7 @@ import {
   normalizeCountryCode,
   getCountryName 
 } from '../utils/countryCodeMapping';
+import { Tab } from '@headlessui/react';
 
 // Define the geometry type for countries
 type CountryGeometry = GeometryCollection & { id: string };
@@ -37,22 +38,28 @@ export function WorldMap({}: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [selectedYear, setSelectedYear] = useState<number>(2021);
-  const [tradeData, setTradeData] = useState<TradeData[]>([]);
   const [connections, setConnections] = useState<CountryConnection[]>([]);
   const tradeService = TradeDataService.getInstance();
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
+  const [allYearsData, setAllYearsData] = useState<Map<number, TradeData[]>>(new Map());
+  const [availableYears, setAvailableYears] = useState<number[]>([]);
 
-  // Separate useEffect for loading trade data
+  // Keep only one useEffect for loading data
   useEffect(() => {
-    const loadData = async () => {
+    const loadAllData = async () => {
       setIsLoading(true);
       setError(null);
       try {
-        const data = await tradeService.loadTradeData(selectedYear);
-        setTradeData(data);
+        const data = await tradeService.loadAllTradeData();
+        setAllYearsData(data);
+        setAvailableYears(
+          Array.from(data.keys())
+            .sort((a: number, b: number) => b - a)
+        );
+        // Load connections for the selected year
         const connectionData = await tradeService.getTradeConnections(selectedYear);
         setConnections(connectionData);
       } catch (error) {
@@ -63,8 +70,8 @@ export function WorldMap({}: Props) {
       }
     };
 
-    loadData();
-  }, [selectedYear]);
+    loadAllData();
+  }, [selectedYear]); // Add selectedYear as dependency
 
   useEffect(() => {
     const handleResize = () => {
@@ -85,6 +92,8 @@ export function WorldMap({}: Props) {
   useEffect(() => {
     if (!svgRef.current || !containerRef.current || isLoading || error) return;
 
+    const currentYearData = allYearsData.get(selectedYear) || [];
+    
     const svg = d3.select(svgRef.current)
       .attr('width', dimensions.width)
       .attr('height', dimensions.height);
@@ -123,7 +132,7 @@ export function WorldMap({}: Props) {
           .attr('d', d => pathGenerator(d) || '')
           .attr('class', 'country')
           .style('fill', (d) => {
-            if (!tradeData || !d || !d.id) return '#ccc';
+            if (!currentYearData || !d || !d.id) return '#ccc';
 
             try {
               const normalizedCode = normalizeCountryCode(d.id);
@@ -131,7 +140,7 @@ export function WorldMap({}: Props) {
               if (!witsCode && !logMissingCountry(d.id)) {
                 return '#eee';
               }
-              const countryData = tradeData.find(td => td && td.countryCode === witsCode);
+              const countryData = currentYearData.find(td => td && td.countryCode === witsCode);
               return countryData ? colorScale(countryData.tradeBalance) : '#ccc';
             } catch (error) {
               console.warn('Error setting fill color:', error);
@@ -141,12 +150,12 @@ export function WorldMap({}: Props) {
           .style('stroke', '#fff')
           .style('stroke-width', '0.5px')
           .on('mouseover', (event, d) => {
-            if (!tradeData || !d || !d.id) return;
+            if (!currentYearData || !d || !d.id) return;
 
             try {
               const normalizedCode = normalizeCountryCode(d.id);
               const witsCode = reverseCountryCodeMapping[normalizedCode];
-              const countryData = tradeData.find(td => td && td.countryCode === witsCode);
+              const countryData = currentYearData.find(td => td && td.countryCode === witsCode);
               
               if (countryData) {
                 showTooltip(event, countryData);
@@ -168,12 +177,12 @@ export function WorldMap({}: Props) {
               .style('stroke', '#fff');
           })
           .on('click', (event, d) => {
-            if (!tradeData || !d || !d.id) return;
+            if (!currentYearData || !d || !d.id) return;
 
             try {
               const normalizedCode = normalizeCountryCode(d.id);
               const witsCode = reverseCountryCodeMapping[normalizedCode];
-              const countryData = tradeData.find(td => td && td.countryCode === witsCode);
+              const countryData = currentYearData.find(td => td && td.countryCode === witsCode);
               if (countryData) {
                 setSelectedCountry(countryData.countryCode);
               }
@@ -214,7 +223,7 @@ export function WorldMap({}: Props) {
     return () => {
       svg.selectAll('*').remove();
     };
-  }, [dimensions, tradeData, connections, selectedYear, isLoading, error]);
+  }, [dimensions, allYearsData, selectedYear, isLoading, error]);
 
   const showEmptyTooltip = (event: any, countryCode: string) => {
     const tooltip = d3.select('.tooltip');
@@ -253,7 +262,7 @@ export function WorldMap({}: Props) {
   };
 
   const drawConnections = (svg: d3.Selection<SVGSVGElement, unknown, null, undefined>, projection: d3.GeoProjection) => {
-    if (!tradeData || !connections) return;
+    if (!allYearsData || !connections) return;
 
     svg.selectAll('.connection').remove();
 
@@ -261,8 +270,8 @@ export function WorldMap({}: Props) {
       if (!conn || !conn.source || !conn.target || !conn.value) return false;
       
       // Check if both source and target countries exist in trade data
-      const source = tradeData.find(d => d?.countryCode === normalizeCountryCode(conn.source));
-      const target = tradeData.find(d => d?.countryCode === normalizeCountryCode(conn.target));
+      const source = allYearsData.get(selectedYear)?.find(d => d?.countryCode === normalizeCountryCode(conn.source));
+      const target = allYearsData.get(selectedYear)?.find(d => d?.countryCode === normalizeCountryCode(conn.target));
       
       return (
         conn.value > 1e8 && 
@@ -277,8 +286,8 @@ export function WorldMap({}: Props) {
 
     validConnections.forEach(conn => {
       try {
-        const source = tradeData.find(d => d?.countryCode === normalizeCountryCode(conn.source));
-        const target = tradeData.find(d => d?.countryCode === normalizeCountryCode(conn.target));
+        const source = allYearsData.get(selectedYear)?.find(d => d?.countryCode === normalizeCountryCode(conn.source));
+        const target = allYearsData.get(selectedYear)?.find(d => d?.countryCode === normalizeCountryCode(conn.target));
 
         if (!source || !target) return;
 
@@ -301,7 +310,8 @@ export function WorldMap({}: Props) {
 
   // Update the sidebar content rendering
   const renderSidebar = () => {
-    const selectedCountryData = tradeData.find(td => td.countryCode === selectedCountry);
+    const currentYearData = allYearsData.get(selectedYear) || [];
+    const selectedCountryData = currentYearData.find(td => td.countryCode === selectedCountry);
     
     if (!selectedCountryData) return null;
 
@@ -367,28 +377,114 @@ export function WorldMap({}: Props) {
     );
   };
 
+  const renderDataTable = (yearData: TradeData[]) => {
+    const formatCurrency = d3.format('$,.0f');
+    
+    return (
+      <div className="overflow-x-auto">
+        <table className="min-w-full table-auto">
+          <thead>
+            <tr className="bg-gray-100">
+              <th className="px-4 py-2">Country</th>
+              <th className="px-4 py-2">Exports</th>
+              <th className="px-4 py-2">Imports</th>
+              <th className="px-4 py-2">Trade Balance</th>
+            </tr>
+          </thead>
+          <tbody>
+            {yearData
+              .sort((a, b) => b.tradeBalance - a.tradeBalance)
+              .map((data) => (
+                <tr 
+                  key={data.countryCode} 
+                  className="hover:bg-gray-50 cursor-pointer"
+                  onClick={() => setSelectedCountry(data.countryCode)}
+                >
+                  <td className="border px-4 py-2">{data.country}</td>
+                  <td className="border px-4 py-2">{formatCurrency(data.exports)}</td>
+                  <td className="border px-4 py-2">{formatCurrency(data.imports)}</td>
+                  <td className="border px-4 py-2">{formatCurrency(data.tradeBalance)}</td>
+                </tr>
+              ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
+
   // Add loading and error states to the render
   return (
-    <div className="world-map" ref={containerRef}>
-      <div className="controls">
-        <label>
-          Year:
-          <select 
-            value={selectedYear} 
-            onChange={(e) => setSelectedYear(Number(e.target.value))}
-            disabled={isLoading}
-          >
-            {Array.from({length: 22}, (_, i) => 2000 + i).map(year => (
-              <option key={year} value={year}>{year}</option>
-            ))}
-          </select>
-        </label>
-        {isLoading && <span className="loading">Loading data...</span>}
-        {error && <span className="error">{error}</span>}
+    <div className="flex h-full">
+      <div className="flex-1">
+        <div className="world-map" ref={containerRef}>
+          <div className="controls">
+            <label>
+              Year:
+              <select 
+                value={selectedYear} 
+                onChange={(e) => setSelectedYear(Number(e.target.value))}
+                disabled={isLoading}
+              >
+                {Array.from({length: 22}, (_, i) => 2000 + i).map(year => (
+                  <option key={year} value={year}>{year}</option>
+                ))}
+              </select>
+            </label>
+            {isLoading && <span className="loading">Loading data...</span>}
+            {error && <span className="error">{error}</span>}
+          </div>
+          <svg ref={svgRef}></svg>
+          <div className="tooltip"></div>
+          {!isLoading && !error && selectedCountry && renderSidebar()}
+        </div>
       </div>
-      <svg ref={svgRef}></svg>
-      <div className="tooltip"></div>
-      {!isLoading && !error && selectedCountry && renderSidebar()}
+      <div className="w-1/3 min-w-[400px] bg-white border-l border-gray-200 overflow-y-auto">
+        <Tab.Group>
+          <Tab.List className="flex border-b border-gray-200">
+            <Tab
+              className={({ selected }) =>
+                `flex-1 py-2 px-4 text-sm font-medium focus:outline-none ${
+                  selected
+                    ? 'text-blue-600 border-b-2 border-blue-600'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`
+              }
+            >
+              Map View
+            </Tab>
+            <Tab
+              className={({ selected }) =>
+                `flex-1 py-2 px-4 text-sm font-medium focus:outline-none ${
+                  selected
+                    ? 'text-blue-600 border-b-2 border-blue-600'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`
+              }
+            >
+              Data View
+            </Tab>
+          </Tab.List>
+          <Tab.Panels>
+            <Tab.Panel>
+              {selectedCountry && renderSidebar()}
+            </Tab.Panel>
+            <Tab.Panel className="p-4">
+              <div className="mb-4">
+                <select
+                  value={selectedYear}
+                  onChange={(e) => setSelectedYear(Number(e.target.value))}
+                  className="border border-gray-300 rounded px-2 py-1"
+                >
+                  {availableYears.map(year => (
+                    <option key={year} value={year}>{year}</option>
+                  ))}
+                </select>
+              </div>
+              {allYearsData.get(selectedYear) && renderDataTable(allYearsData.get(selectedYear)!)}
+            </Tab.Panel>
+          </Tab.Panels>
+        </Tab.Group>
+      </div>
     </div>
   );
 }

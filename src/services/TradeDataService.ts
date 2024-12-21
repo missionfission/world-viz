@@ -181,6 +181,66 @@ export class TradeDataService {
       return [];
     }
   }
+
+  public async loadAllTradeData(): Promise<Map<number, TradeData[]>> {
+    try {
+      const allData = new Map<number, TradeData[]>();
+      
+      // Load data for each country
+      const promises = this.countryCodes.map(async (countryCode) => {
+        try {
+          const response = await fetch(`/wits_en_at-a-glance_allcountries_allyears/en_${countryCode}_At-a-Glance.csv`);
+          const csvText = await response.text();
+          const rows = d3.csvParse(csvText) as WITSDataRow[];
+          
+          // Group data by year
+          const yearGroups = d3.group(rows, row => Number(row.Year));
+          
+          yearGroups.forEach((yearData, year) => {
+            const exports = yearData.find(row => 
+              row.Partner === 'World' && 
+              row['Product categories'] === 'All Products' &&
+              row.Indicator === 'Exports (in US$ Mil)'
+            );
+
+            const imports = yearData.find(row => 
+              row.Partner === 'World' && 
+              row['Product categories'] === 'All Products' &&
+              row.Indicator === 'Imports (in US$ Mil)'
+            );
+
+            if (exports && imports) {
+              const coordinates = countryCoordinates[countryCode] || { latitude: 0, longitude: 0 };
+              const countryTradeData = {
+                country: exports.Reporter,
+                countryCode: countryCode,
+                year: year,
+                exports: Number(exports['Indicator Value']) * 1e6,
+                imports: Number(imports['Indicator Value']) * 1e6,
+                tradeBalance: (Number(exports['Indicator Value']) - Number(imports['Indicator Value'])) * 1e6,
+                latitude: coordinates.latitude,
+                longitude: coordinates.longitude,
+              } as TradeData;
+
+              if (!allData.has(year)) {
+                allData.set(year, []);
+              }
+              allData.get(year)?.push(countryTradeData);
+            }
+          });
+        } catch (error) {
+          console.error(`Error loading data for ${countryCode}:`, error);
+        }
+      });
+
+      await Promise.all(promises);
+      this.tradeData = allData; // Store all data in the service
+      return allData;
+    } catch (error) {
+      console.error('Error loading all trade data:', error);
+      return new Map();
+    }
+  }
 }
 
 export default TradeDataService; 
