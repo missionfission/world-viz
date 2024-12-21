@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import { geoMercator, geoPath } from 'd3-geo';
 import { Feature, Geometry, GeoJsonProperties } from 'geojson';
-import { TradeData, CountryConnection, CountryTradeData } from '../types/TradeData';
+import { TradeData, CountryConnection, Partner } from '../types/TradeData';
 import * as topojson from 'topojson-client';
 import { Topology, Objects, GeometryCollection } from 'topojson-specification';
 import '../styles/WorldMap.css';
@@ -24,13 +24,9 @@ interface WorldTopology extends Topology<{ countries: GeometryCollection }> {
 type FeatureType = Feature<Geometry> & { id: string };
 type FeatureCollection = { type: "FeatureCollection", features: FeatureType[] };
 
-interface Props {
-  width: number;
-  height: number;
-  tradeData: CountryTradeData;
-}
+interface Props {}
 
-export function WorldMap({ width, height, tradeData }: Props) {
+export function WorldMap({}: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [selectedYear, setSelectedYear] = useState<number>(2021);
@@ -40,6 +36,7 @@ export function WorldMap({ width, height, tradeData }: Props) {
   const [isLoading, setIsLoading] = useState(true);
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
   const [worldData, setWorldData] = useState(null);
+  const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
 
   useEffect(() => {
     const loadData = async () => {
@@ -47,7 +44,6 @@ export function WorldMap({ width, height, tradeData }: Props) {
       try {
         const data = await tradeService.loadTradeData(selectedYear);
         setTradeData(data);
-        
         const connectionData = await tradeService.getTradeConnections(selectedYear);
         setConnections(connectionData);
       } catch (error) {
@@ -61,23 +57,32 @@ export function WorldMap({ width, height, tradeData }: Props) {
   }, [selectedYear]);
 
   useEffect(() => {
+    const handleResize = () => {
+      if (containerRef.current) {
+        setDimensions({
+          width: containerRef.current.clientWidth,
+          height: containerRef.current.clientHeight
+        });
+      }
+    };
+
+    handleResize(); // Initial size
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  useEffect(() => {
     if (!svgRef.current || !containerRef.current) return;
 
-    const containerWidth = containerRef.current.getBoundingClientRect().width;
-    const containerHeight = containerRef.current.getBoundingClientRect().height;
-    
-    const width = containerWidth || 960;
-    const height = containerHeight || 500;
-
     const svg = d3.select(svgRef.current)
-      .attr('width', width)
-      .attr('height', height);
+      .attr('width', dimensions.width)
+      .attr('height', dimensions.height);
 
     svg.selectAll('*').remove();
 
     const projection = geoMercator()
-      .scale(width / 2 / Math.PI)
-      .translate([width / 2, height / 2]);
+      .scale(dimensions.width / 2 / Math.PI)
+      .translate([dimensions.width / 2, dimensions.height / 2]);
 
     const pathGenerator = geoPath(projection);
 
@@ -127,7 +132,7 @@ export function WorldMap({ width, height, tradeData }: Props) {
         // Add legend
         const legend = svg.append('g')
           .attr('class', 'legend')
-          .attr('transform', `translate(${width - 120}, ${height - 100})`);
+          .attr('transform', `translate(${dimensions.width - 120}, ${dimensions.height - 100})`);
 
         legend.append('text')
           .attr('class', 'legend-title')
@@ -152,7 +157,7 @@ export function WorldMap({ width, height, tradeData }: Props) {
     return () => {
       svg.selectAll('*').remove();
     };
-  }, [tradeData, selectedYear]);
+  }, [dimensions, tradeData, connections, selectedYear]);
 
   const showTooltip = (event: any, data: TradeData) => {
     const tooltip = d3.select('.tooltip');
@@ -223,27 +228,29 @@ export function WorldMap({ width, height, tradeData }: Props) {
       <svg ref={svgRef}></svg>
       <div className="tooltip"></div>
       
-      {selectedCountry && tradeData[selectedCountry] && (
+      {selectedCountry && tradeData.find(td => td.countryCode === selectedCountry) && (
         <div className="absolute top-4 right-4 bg-white p-4 rounded shadow-lg">
           <h3 className="text-lg font-bold mb-2">Trade Statistics</h3>
           <div className="mb-4">
             <h4 className="font-semibold">Latest Exports</h4>
-            <p>${Math.round(Object.values(tradeData[selectedCountry].exports).pop() || 0).toLocaleString()} Million</p>
+            <p>${Math.round(tradeData.find(td => td.countryCode === selectedCountry)?.exports || 0).toLocaleString()} Million</p>
           </div>
           <div className="mb-4">
             <h4 className="font-semibold">Latest Imports</h4>
-            <p>${Math.round(Object.values(tradeData[selectedCountry].imports).pop() || 0).toLocaleString()} Million</p>
+            <p>${Math.round(tradeData.find(td => td.countryCode === selectedCountry)?.imports || 0).toLocaleString()} Million</p>
           </div>
-          <div className="mb-4">
-            <h4 className="font-semibold">Top Export Partners</h4>
-            <ul>
-              {tradeData[selectedCountry].topPartners.exports.map(partner => (
-                <li key={partner.partner}>
-                  {partner.partner}: ${Math.round(partner.value).toLocaleString()}M
-                </li>
-              ))}
-            </ul>
-          </div>
+          {tradeData.find(td => td.countryCode === selectedCountry)?.topPartners && (
+            <div className="mb-4">
+              <h4 className="font-semibold">Top Export Partners</h4>
+              <ul>
+                {tradeData.find(td => td.countryCode === selectedCountry)?.topPartners?.exports.map((partner: Partner) => (
+                  <li key={partner.partner}>
+                    {partner.partner}: ${Math.round(partner.value).toLocaleString()}M
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
     </div>

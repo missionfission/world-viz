@@ -1,6 +1,6 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import WorldMap from './components/WorldMap';
+import { WorldMap } from './components/WorldMap';
 import Header from './components/Header';
 import './App.css';
 

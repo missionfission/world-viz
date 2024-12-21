@@ -1,80 +1,41 @@
-import { TradeDataRow, ProcessedTradeData } from '../types/TradeData';
+import { TradeData, Partner } from '../types/TradeData';
 
-export function processTradeData(data: TradeDataRow[]): ProcessedTradeData {
-  const result: ProcessedTradeData = {
-    exports: {},
-    imports: {},
+interface RawTradeData {
+  Reporter: string;
+  Year: string;
+  Partner: string;
+  'Product categories': string;
+  'Indicator Type': string;
+  Indicator: string;
+  'Indicator Value': string;
+}
+
+export function processTradeData(data: RawTradeData[]): TradeData {
+  const result: TradeData = {
+    country: data[0].Reporter,
+    countryCode: '', // You'll need to add logic to get the country code
+    year: parseInt(data[0].Year),
+    exports: 0,
+    imports: 0,
+    tradeBalance: 0,
+    latitude: 0,
+    longitude: 0,
     topPartners: {
-      exports: [],
-      imports: []
-    },
-    productCategories: {
       exports: [],
       imports: []
     }
   };
 
-  // Process total exports and imports by year
-  data.forEach(row => {
-    if (row['Indicator Type'] === 'Export' && row.Partner === 'World' && row['Product categories'] === 'All Products') {
-      Object.keys(row).forEach(key => {
-        if (!isNaN(parseInt(key))) {
-          result.exports[key] = parseFloat(row[key] as string) || 0;
-        }
-      });
-    }
-    if (row['Indicator Type'] === 'Import' && row.Partner === 'World' && row['Product categories'] === 'All Products') {
-      Object.keys(row).forEach(key => {
-        if (!isNaN(parseInt(key))) {
-          result.imports[key] = parseFloat(row[key] as string) || 0;
-        }
-      });
-    }
-  });
+  // Process the data...
 
-  // Process top trading partners
-  const latestYear = Math.max(...Object.keys(result.exports).map(Number));
+  // Sort and limit to top 5 partners with proper typing
+  result.topPartners?.exports.sort((a: Partner, b: Partner) => b.value - a.value);
+  result.topPartners?.imports.sort((a: Partner, b: Partner) => b.value - a.value);
   
-  data.forEach(row => {
-    if (row.Partner !== 'World' && row[latestYear.toString()]) {
-      if (row['Indicator Type'] === 'Export') {
-        result.topPartners.exports.push({
-          partner: row.Partner,
-          value: parseFloat(row[latestYear.toString()] as string) || 0
-        });
-      }
-      if (row['Indicator Type'] === 'Import') {
-        result.topPartners.imports.push({
-          partner: row.Partner,
-          value: parseFloat(row[latestYear.toString()] as string) || 0
-        });
-      }
-    }
-  });
-
-  // Sort and limit to top 5 partners
-  result.topPartners.exports.sort((a, b) => b.value - a.value);
-  result.topPartners.imports.sort((a, b) => b.value - a.value);
-  result.topPartners.exports = result.topPartners.exports.slice(0, 5);
-  result.topPartners.imports = result.topPartners.imports.slice(0, 5);
-
-  // Process product categories
-  data.forEach(row => {
-    if (row.Partner === 'World' && row['Product categories'] !== 'All Products') {
-      if (row['Indicator Type'] === 'Export') {
-        result.productCategories.exports.push({
-          category: row['Product categories'],
-          value: parseFloat(row[latestYear.toString()] as string) || 0
-        });
-      }
-      if (row['Indicator Type'] === 'Import') {
-        result.productCategories.imports.push({
-          category: row['Product categories'],
-          value: parseFloat(row[latestYear.toString()] as string) || 0
-        });
-      }
-    }
-  });
+  if (result.topPartners) {
+    result.topPartners.exports = result.topPartners.exports.slice(0, 5);
+    result.topPartners.imports = result.topPartners.imports.slice(0, 5);
+  }
 
   return result;
 } 

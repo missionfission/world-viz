@@ -5,15 +5,24 @@ export interface TradeData {
   exports: number;
   imports: number;
   tradeBalance: number;
-  gdp?: number;
-  population?: number;
-  longitude: number;
   latitude: number;
+  longitude: number;
+  topPartners?: {
+    exports: Partner[];
+    imports: Partner[];
+  };
 }
+
+export interface Partner {
+  partner: string;
+  value: number;
+}
+
+export type TradeType = "export" | "import";
 
 export interface CountryConnection {
   source: string;
   target: string;
   value: number;
-  type: 'export' | 'import';
+  type: TradeType;
 } 
