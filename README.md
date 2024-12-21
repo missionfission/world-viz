@@ -37,3 +37,8 @@ npm run build
 ```
 
 The built files will be available in the `dist` directory.
+
+# TODO
+
+- Check what data is in the folders and files
+- Make a tab of imports/exports and GDP
