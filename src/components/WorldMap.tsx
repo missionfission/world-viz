@@ -7,6 +7,13 @@ import * as topojson from 'topojson-client';
 import { Topology, Objects, GeometryCollection } from 'topojson-specification';
 import '../styles/WorldMap.css';
 import TradeDataService from '../services/TradeDataService';
+import { 
+  countryCodeMapping, 
+  reverseCountryCodeMapping, 
+  logMissingCountry, 
+  normalizeCountryCode,
+  getCountryName 
+} from '../utils/countryCodeMapping';
 
 // Define the geometry type for countries
 type CountryGeometry = GeometryCollection & { id: string };
@@ -34,13 +41,15 @@ export function WorldMap({}: Props) {
   const [connections, setConnections] = useState<CountryConnection[]>([]);
   const tradeService = TradeDataService.getInstance();
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
-  const [worldData, setWorldData] = useState(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
 
+  // Separate useEffect for loading trade data
   useEffect(() => {
     const loadData = async () => {
       setIsLoading(true);
+      setError(null);
       try {
         const data = await tradeService.loadTradeData(selectedYear);
         setTradeData(data);
@@ -48,6 +57,7 @@ export function WorldMap({}: Props) {
         setConnections(connectionData);
       } catch (error) {
         console.error('Error loading data:', error);
+        setError('Failed to load trade data');
       } finally {
         setIsLoading(false);
       }
@@ -71,8 +81,9 @@ export function WorldMap({}: Props) {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  // Separate useEffect for drawing the map
   useEffect(() => {
-    if (!svgRef.current || !containerRef.current) return;
+    if (!svgRef.current || !containerRef.current || isLoading || error) return;
 
     const svg = d3.select(svgRef.current)
       .attr('width', dimensions.width)
@@ -94,11 +105,10 @@ export function WorldMap({}: Props) {
     d3.json<WorldTopology>('https://unpkg.com/world-atlas@2.0.2/countries-110m.json')
       .then((topology) => {
         if (!topology) {
-          console.error('Invalid topology data');
+          setError('Invalid topology data');
           return;
         }
 
-        // Convert TopoJSON to GeoJSON with proper typing
         const geojson = topojson.feature(
           topology,
           topology.objects.countries
@@ -113,18 +123,64 @@ export function WorldMap({}: Props) {
           .attr('d', d => pathGenerator(d) || '')
           .attr('class', 'country')
           .style('fill', (d) => {
-            const countryData = tradeData.find(td => td.countryCode === d.id);
-            return countryData ? colorScale(countryData.tradeBalance) : '#ccc';
+            if (!tradeData || !d || !d.id) return '#ccc';
+
+            try {
+              const normalizedCode = normalizeCountryCode(d.id);
+              const witsCode = reverseCountryCodeMapping[normalizedCode];
+              if (!witsCode && !logMissingCountry(d.id)) {
+                return '#eee';
+              }
+              const countryData = tradeData.find(td => td && td.countryCode === witsCode);
+              return countryData ? colorScale(countryData.tradeBalance) : '#ccc';
+            } catch (error) {
+              console.warn('Error setting fill color:', error);
+              return '#ccc';
+            }
           })
           .style('stroke', '#fff')
           .style('stroke-width', '0.5px')
           .on('mouseover', (event, d) => {
-            const countryData = tradeData.find(td => td.countryCode === d.id);
-            if (countryData) {
-              showTooltip(event, countryData);
+            if (!tradeData || !d || !d.id) return;
+
+            try {
+              const normalizedCode = normalizeCountryCode(d.id);
+              const witsCode = reverseCountryCodeMapping[normalizedCode];
+              const countryData = tradeData.find(td => td && td.countryCode === witsCode);
+              
+              if (countryData) {
+                showTooltip(event, countryData);
+                d3.select(event.currentTarget)
+                  .style('stroke-width', '2px')
+                  .style('stroke', '#000');
+              } else {
+                showEmptyTooltip(event, d.id);
+              }
+            } catch (error) {
+              console.warn('Error showing tooltip:', error);
+              showEmptyTooltip(event, d.id);
             }
           })
-          .on('mouseout', hideTooltip);
+          .on('mouseout', (event) => {
+            hideTooltip();
+            d3.select(event.currentTarget)
+              .style('stroke-width', '0.5px')
+              .style('stroke', '#fff');
+          })
+          .on('click', (event, d) => {
+            if (!tradeData || !d || !d.id) return;
+
+            try {
+              const normalizedCode = normalizeCountryCode(d.id);
+              const witsCode = reverseCountryCodeMapping[normalizedCode];
+              const countryData = tradeData.find(td => td && td.countryCode === witsCode);
+              if (countryData) {
+                setSelectedCountry(countryData.countryCode);
+              }
+            } catch (error) {
+              console.warn('Error handling click:', error);
+            }
+          });
 
         // Draw trade connections
         drawConnections(svg, projection);
@@ -152,23 +208,43 @@ export function WorldMap({}: Props) {
       })
       .catch((error) => {
         console.error('Error loading map data:', error);
+        setError('Failed to load map data');
       });
 
     return () => {
       svg.selectAll('*').remove();
     };
-  }, [dimensions, tradeData, connections, selectedYear]);
+  }, [dimensions, tradeData, connections, selectedYear, isLoading, error]);
 
-  const showTooltip = (event: any, data: TradeData) => {
+  const showEmptyTooltip = (event: any, countryCode: string) => {
     const tooltip = d3.select('.tooltip');
     tooltip.style('display', 'block')
       .style('left', `${event.pageX + 10}px`)
       .style('top', `${event.pageY + 10}px`)
       .html(`
-        <strong>${data.country}</strong><br/>
-        Exports: ${d3.format('$,.0f')(data.exports)}<br/>
-        Imports: ${d3.format('$,.0f')(data.imports)}<br/>
-        Trade Balance: ${d3.format('$,.0f')(data.tradeBalance)}
+        <strong>${getCountryName(countryCode)}</strong><br/>
+        No trade data available
+      `);
+  };
+
+  const showTooltip = (event: any, data: TradeData) => {
+    if (!data) return;
+
+    const tooltip = d3.select('.tooltip');
+    const formatCurrency = d3.format('$,.0f');
+    
+    const exports = data.exports !== undefined ? formatCurrency(data.exports) : 'N/A';
+    const imports = data.imports !== undefined ? formatCurrency(data.imports) : 'N/A';
+    const balance = data.tradeBalance !== undefined ? formatCurrency(data.tradeBalance) : 'N/A';
+
+    tooltip.style('display', 'block')
+      .style('left', `${event.pageX + 10}px`)
+      .style('top', `${event.pageY + 10}px`)
+      .html(`
+        <strong>${data.country || getCountryName(data.countryCode)}</strong><br/>
+        Exports: ${exports}<br/>
+        Imports: ${imports}<br/>
+        Trade Balance: ${balance}
       `);
   };
 
@@ -177,37 +253,121 @@ export function WorldMap({}: Props) {
   };
 
   const drawConnections = (svg: d3.Selection<SVGSVGElement, unknown, null, undefined>, projection: d3.GeoProjection) => {
+    if (!tradeData || !connections) return;
+
     svg.selectAll('.connection').remove();
 
-    connections
-      .filter(conn => conn.value > 1e8) // Only show significant trade relationships
-      .forEach(conn => {
-        const source = tradeData.find(d => d.countryCode === conn.source);
-        const target = tradeData.find(d => d.countryCode === conn.target);
+    const validConnections = connections.filter(conn => {
+      if (!conn || !conn.source || !conn.target || !conn.value) return false;
+      
+      // Check if both source and target countries exist in trade data
+      const source = tradeData.find(d => d?.countryCode === normalizeCountryCode(conn.source));
+      const target = tradeData.find(d => d?.countryCode === normalizeCountryCode(conn.target));
+      
+      return (
+        conn.value > 1e8 && 
+        source && 
+        target && 
+        source.longitude != null && 
+        source.latitude != null && 
+        target.longitude != null && 
+        target.latitude != null
+      );
+    });
 
-        if (source?.longitude !== undefined && 
-            source?.latitude !== undefined && 
-            target?.longitude !== undefined && 
-            target?.latitude !== undefined) {
-          const sourceCoords = projection([source.longitude, source.latitude]);
-          const targetCoords = projection([target.longitude, target.latitude]);
+    validConnections.forEach(conn => {
+      try {
+        const source = tradeData.find(d => d?.countryCode === normalizeCountryCode(conn.source));
+        const target = tradeData.find(d => d?.countryCode === normalizeCountryCode(conn.target));
 
-          if (sourceCoords && targetCoords) {
-            svg.append('path')
-              .attr('class', 'connection')
-              .attr('d', `M${sourceCoords[0]},${sourceCoords[1]}L${targetCoords[0]},${targetCoords[1]}`)
-              .style('stroke-width', Math.log(conn.value / 1e8))
-              .style('opacity', 0.2)
-              .style('stroke', conn.type === 'export' ? '#4CAF50' : '#F44336');
-          }
-        }
-      });
+        if (!source || !target) return;
+
+        const sourceCoords = projection([source.longitude, source.latitude]);
+        const targetCoords = projection([target.longitude, target.latitude]);
+
+        if (!sourceCoords || !targetCoords) return;
+
+        svg.append('path')
+          .attr('class', 'connection')
+          .attr('d', `M${sourceCoords[0]},${sourceCoords[1]}L${targetCoords[0]},${targetCoords[1]}`)
+          .style('stroke-width', Math.log(conn.value / 1e8))
+          .style('opacity', 0.2)
+          .style('stroke', conn.type === 'export' ? '#4CAF50' : '#F44336');
+      } catch (error) {
+        console.warn('Error drawing connection:', error);
+      }
+    });
   };
 
-  const handleCountryClick = (countryCode: string) => {
-    setSelectedCountry(countryCode);
+  // Update the sidebar content rendering
+  const renderSidebar = () => {
+    const selectedCountryData = tradeData.find(td => td.countryCode === selectedCountry);
+    
+    if (!selectedCountryData) return null;
+
+    const formatCurrency = d3.format('$,.0f');
+    const topPartners = selectedCountryData.topPartners;
+
+    return (
+      <div className="country-sidebar">
+        <div className="absolute top-4 right-4 bg-white p-4 rounded shadow-lg max-w-md">
+          <button 
+            className="absolute top-2 right-2 text-gray-500 hover:text-gray-700"
+            onClick={() => setSelectedCountry(null)}
+          >
+            ×
+          </button>
+          <h3 className="text-lg font-bold mb-2">
+            {selectedCountryData.country || getCountryName(selectedCountryData.countryCode)}
+          </h3>
+          {selectedCountryData.exports !== undefined && (
+            <div className="mb-4">
+              <h4 className="font-semibold">Exports</h4>
+              <p>{formatCurrency(selectedCountryData.exports)}</p>
+            </div>
+          )}
+          {selectedCountryData.imports !== undefined && (
+            <div className="mb-4">
+              <h4 className="font-semibold">Imports</h4>
+              <p>{formatCurrency(selectedCountryData.imports)}</p>
+            </div>
+          )}
+          {selectedCountryData.tradeBalance !== undefined && (
+            <div className="mb-4">
+              <h4 className="font-semibold">Trade Balance</h4>
+              <p>{formatCurrency(selectedCountryData.tradeBalance)}</p>
+            </div>
+          )}
+          {topPartners?.exports && topPartners.exports.length > 0 && (
+            <div className="mb-4">
+              <h4 className="font-semibold">Top Export Partners</h4>
+              <ul className="list-disc pl-4">
+                {topPartners.exports.map((partner) => (
+                  <li key={partner.partner}>
+                    {partner.partner}: {formatCurrency(partner.value)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {topPartners?.imports && topPartners.imports.length > 0 && (
+            <div className="mb-4">
+              <h4 className="font-semibold">Top Import Partners</h4>
+              <ul className="list-disc pl-4">
+                {topPartners.imports.map((partner) => (
+                  <li key={partner.partner}>
+                    {partner.partner}: {formatCurrency(partner.value)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      </div>
+    );
   };
 
+  // Add loading and error states to the render
   return (
     <div className="world-map" ref={containerRef}>
       <div className="controls">
@@ -223,36 +383,12 @@ export function WorldMap({}: Props) {
             ))}
           </select>
         </label>
-        {isLoading && <span className="loading">Loading...</span>}
+        {isLoading && <span className="loading">Loading data...</span>}
+        {error && <span className="error">{error}</span>}
       </div>
       <svg ref={svgRef}></svg>
       <div className="tooltip"></div>
-      
-      {selectedCountry && tradeData.find(td => td.countryCode === selectedCountry) && (
-        <div className="absolute top-4 right-4 bg-white p-4 rounded shadow-lg">
-          <h3 className="text-lg font-bold mb-2">Trade Statistics</h3>
-          <div className="mb-4">
-            <h4 className="font-semibold">Latest Exports</h4>
-            <p>${Math.round(tradeData.find(td => td.countryCode === selectedCountry)?.exports || 0).toLocaleString()} Million</p>
-          </div>
-          <div className="mb-4">
-            <h4 className="font-semibold">Latest Imports</h4>
-            <p>${Math.round(tradeData.find(td => td.countryCode === selectedCountry)?.imports || 0).toLocaleString()} Million</p>
-          </div>
-          {tradeData.find(td => td.countryCode === selectedCountry)?.topPartners && (
-            <div className="mb-4">
-              <h4 className="font-semibold">Top Export Partners</h4>
-              <ul>
-                {tradeData.find(td => td.countryCode === selectedCountry)?.topPartners?.exports.map((partner: Partner) => (
-                  <li key={partner.partner}>
-                    {partner.partner}: ${Math.round(partner.value).toLocaleString()}M
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </div>
-      )}
+      {!isLoading && !error && selectedCountry && renderSidebar()}
     </div>
   );
 }

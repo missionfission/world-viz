@@ -56,8 +56,6 @@ export class TradeDataService {
     }
 
     try {
-      const countryData = new Map<string, TradeData>();
-      
       // Load data for each country in parallel
       const promises = this.countryCodes.map(async (countryCode) => {
         try {
@@ -68,19 +66,40 @@ export class TradeDataService {
           // Filter rows for the specified year
           const yearData = rows.filter(row => Number(row.Year) === year);
           
+          // Get total exports and imports
           const exports = yearData.find(row => 
-            row['Indicator Type'] === 'Export' && 
             row.Partner === 'World' && 
             row['Product categories'] === 'All Products' &&
             row.Indicator === 'Exports (in US$ Mil)'
           );
 
           const imports = yearData.find(row => 
-            row['Indicator Type'] === 'Import' && 
             row.Partner === 'World' && 
             row['Product categories'] === 'All Products' &&
             row.Indicator === 'Imports (in US$ Mil)'
           );
+
+          // Get top export partners
+          const exportPartners = yearData
+            .filter(row => 
+              row.Indicator === 'Trade (US$ Mil)-Top 5 Export Partner' &&
+              row.Partner !== 'Unspecified'
+            )
+            .map(row => ({
+              partner: row.Partner,
+              value: Number(row['Indicator Value']) * 1e6 // Convert to actual dollars
+            }));
+
+          // Get top import partners
+          const importPartners = yearData
+            .filter(row => 
+              row.Indicator === 'Trade (US$ Mil)-Top 5 Import Partner' &&
+              row.Partner !== 'Unspecified'
+            )
+            .map(row => ({
+              partner: row.Partner,
+              value: Number(row['Indicator Value']) * 1e6 // Convert to actual dollars
+            }));
 
           if (exports && imports) {
             const coordinates = countryCoordinates[countryCode] || { latitude: 0, longitude: 0 };
@@ -89,11 +108,15 @@ export class TradeDataService {
               country: exports.Reporter,
               countryCode: countryCode,
               year: year,
-              exports: Number(exports['Indicator Value']) * 1e6,
+              exports: Number(exports['Indicator Value']) * 1e6, // Convert millions to actual dollars
               imports: Number(imports['Indicator Value']) * 1e6,
               tradeBalance: (Number(exports['Indicator Value']) - Number(imports['Indicator Value'])) * 1e6,
               latitude: coordinates.latitude,
-              longitude: coordinates.longitude
+              longitude: coordinates.longitude,
+              topPartners: {
+                exports: exportPartners,
+                imports: importPartners
+              }
             } as TradeData;
           }
         } catch (error) {
@@ -107,7 +130,6 @@ export class TradeDataService {
       
       this.tradeData.set(year, processedData);
       return processedData;
-
     } catch (error) {
       console.error('Error loading trade data:', error);
       return [];
