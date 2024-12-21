@@ -1,4 +1,4 @@
-# World Visualization
+# World Manufacturing and Logistics Visualization
 
 This project provides visualization tools for world data.
 
