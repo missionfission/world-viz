@@ -1,0 +1,15 @@
+.country {
+  fill: #e4e4e4;
+  stroke: #fff;
+  stroke-width: 0.5;
+  cursor: pointer;
+  transition: fill 0.2s;
+}
+
+.country:hover {
+  fill: #bbb;
+}
+
+.country.selected {
+  fill: #4299e1;
+} 
