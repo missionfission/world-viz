@@ -2,6 +2,7 @@
 
 This project provides visualization tools for world data.
 
+## [Manufacturing Point of Entry](manufacturing.md)
 ## Prerequisites
 
 - Node.js (v14 or higher)
